@@ -14,12 +14,15 @@ const Home = () => {
           <p className="text-xl text-gray-600 mb-8">
             Learn American Sign Language (ASL) with our interactive platform. Practice signs in real-time and get instant feedback.
           </p>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-4">
             <Link to="/learning" className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 hover:-translate-y-0.5 hover:shadow-md transition-all font-bold">
               Start Learning
             </Link>
             <Link to="/test" className="bg-gray-200 text-gray-800 px-6 py-3 rounded-lg hover:bg-gray-300 hover:-translate-y-0.5 hover:shadow-md transition-all font-bold">
               Take a Test
+            </Link>
+            <Link to="/quiz" className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 hover:-translate-y-0.5 hover:shadow-md transition-all font-bold">
+              Play Quiz Game
             </Link>
           </div>
         </div>

@@ -314,6 +314,7 @@
             <div class="nav-container">
                 <a href="/" class="nav-link">Home</a>
                 <a href="/learning.html" class="nav-link active">Learning</a>
+                <a href="/quiz.html" class="nav-link">Quiz</a>
                 <a href="/test" class="nav-link">Test</a>
             </div>
             <div class="user-icon">👤</div>
@@ -448,9 +449,18 @@
         // Initialize
         async function initialize() {
             try {
-                // Check API health
+                console.log("Initializing ASL Sign Detector...");
+                
+                // Check API health with timeout
                 try {
-                    const healthResponse = await fetch(`${API_BASE_URL}/health`);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000);
+                    
+                    const healthResponse = await fetch(`${API_BASE_URL}/health`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    
                     const healthData = await healthResponse.json();
                     
                     if (!healthData.model_loaded) {
@@ -463,7 +473,14 @@
                 
                 // Get available letters
                 try {
-                    const response = await fetch(`${API_BASE_URL}/api/available_letters`);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000);
+                    
+                    const response = await fetch(`${API_BASE_URL}/api/available_letters`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    
                     if (response.ok) {
                         const data = await response.json();
                         if (data.status === 'success') {
@@ -491,11 +508,22 @@
                 // Setup camera
                 await setupCamera();
                 
-                // Setup event listeners
-                setupEventListeners();
+                // Setup event listeners after a short delay to ensure DOM is ready
+                setTimeout(() => {
+                    setupEventListeners();
+                    console.log("Event listeners set up");
+                }, 100);
                 
                 // Set threshold marker position
                 thresholdMarkerElement.style.left = `${confidenceThreshold * 100}%`;
+                
+                // Set initial instructions
+                instructionsList.innerHTML = `
+                    <li>Select a letter from the top bar</li>
+                    <li>Position your hand to match the reference image</li>
+                    <li>Press "Start Detection" to begin</li>
+                    <li>Hold your hand steady for best results</li>
+                `;
                 
                 statusElement.textContent = 'Ready to detect. Press Start to begin.';
             } catch (error) {
@@ -515,7 +543,19 @@
                 if (letter === currentTargetLetter) {
                     button.classList.add('active');
                 }
-                button.addEventListener('click', () => selectLetter(letter));
+                
+                // Use multiple event binding approaches for redundancy
+                button.addEventListener('click', function(e) {
+                    console.log(`Letter button ${letter} clicked`);
+                    selectLetter(letter);
+                });
+                
+                // Also set onclick directly
+                button.onclick = function() { 
+                    selectLetter(letter);
+                    return false; // Prevent default
+                };
+                
                 letterSelectorElement.appendChild(button);
             });
         }
@@ -561,9 +601,31 @@
         
         // Setup event listeners
         function setupEventListeners() {
-            toggleBtn.addEventListener('click', toggleLetter);
-            startBtn.addEventListener('click', startDetection);
-            stopBtn.addEventListener('click', stopDetection);
+            // First remove any existing event listeners to prevent duplicates
+            toggleBtn.removeEventListener('click', toggleLetter);
+            startBtn.removeEventListener('click', startDetection);
+            stopBtn.removeEventListener('click', stopDetection);
+            
+            // Add event listeners both ways for redundancy
+            toggleBtn.addEventListener('click', function(e) {
+                console.log("Toggle button clicked");
+                toggleLetter();
+            });
+            
+            startBtn.addEventListener('click', function(e) {
+                console.log("Start button clicked");
+                startDetection();
+            });
+            
+            stopBtn.addEventListener('click', function(e) {
+                console.log("Stop button clicked");
+                stopDetection();
+            });
+            
+            // Also set onclick directly as a fallback
+            toggleBtn.onclick = toggleLetter;
+            startBtn.onclick = startDetection;
+            stopBtn.onclick = stopDetection;
         }
         
         // Toggle to next letter
