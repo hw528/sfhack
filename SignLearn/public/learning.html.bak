@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASL Sign Detector</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        h1, h2 {
+            text-align: center;
+            color: #fff;
+        }
+        .video-container {
+            position: relative;
+            margin: 20px auto;
+            width: 100%;
+            max-width: 640px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+        }
+        video {
+            width: 100%;
+            display: block;
+            transform: scaleX(-1); /* Mirror the video */
+        }
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            color: white;
+            font-size: 16px;
+        }
+        .info-panel {
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+        .letter-selector {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 5px;
+            margin: 15px 0;
+        }
+        .letter-btn {
+            background-color: #333;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .letter-btn:hover {
+            background-color: #555;
+        }
+        .letter-btn.active {
+            background-color: #4CAF50;
+        }
+        .instructions-container {
+            margin-top: 15px;
+        }
+        .instructions-list {
+            list-style-type: decimal;
+            padding-left: 20px;
+        }
+        .feedback {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .feedback.correct {
+            background-color: rgba(76, 175, 80, 0.2);
+            border: 1px solid #4CAF50;
+        }
+        .feedback.incorrect {
+            background-color: rgba(244, 67, 54, 0.2);
+            border: 1px solid #F44336;
+        }
+        .confidence-bar-container {
+            margin-top: 15px;
+            background-color: #333;
+            height: 20px;
+            border-radius: 10px;
+            position: relative;
+        }
+        .confidence-bar {
+            height: 100%;
+            border-radius: 10px;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .confidence-threshold {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background-color: white;
+        }
+        .hidden {
+            display: none;
+        }
+        .status {
+            text-align: center;
+            margin-top: 10px;
+            font-style: italic;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        /* Navigation styles */
+        .nav-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        .nav-link {
+            background-color: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+        }
+        .nav-link:hover {
+            background-color: #555;
+        }
+        .nav-link.active {
+            background-color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ASL Sign Detector</h1>
+        
+        <!-- Navigation links -->
+        <div class="nav-container">
+            <a href="/" class="nav-link">Home</a>
+            <a href="/learning.html" class="nav-link active">Learning</a>
+            <a href="/test" class="nav-link">Test</a>
+        </div>
+        
+        <div class="video-container">
+            <video id="webcam" autoplay muted playsinline></video>
+            <div class="overlay">
+                Target Letter: <span id="target-letter">Loading...</span>
+            </div>
+        </div>
+        
+        <div class="info-panel">
+            <h2>Sign Instructions</h2>
+            <div class="instructions-container">
+                <ul id="instructions-list" class="instructions-list">
+                    <li>Loading instructions...</li>
+                </ul>
+            </div>
+            
+            <div id="feedback" class="feedback">
+                Waiting for detection...
+            </div>
+            
+            <div class="confidence-bar-container">
+                <div id="confidence-bar" class="confidence-bar"></div>
+                <div id="threshold-marker" class="confidence-threshold"></div>
+            </div>
+            
+            <div id="confidence-text" class="status">
+                Confidence: 0%
+            </div>
+            
+            <div class="letter-selector" id="letter-selector">
+                <!-- Letters will be added here dynamically -->
+                <div>Loading available letters...</div>
+            </div>
+            
+            <div class="controls">
+                <button id="toggle-btn">Toggle Letter</button>
+                <button id="start-btn">Start Detection</button>
+                <button id="stop-btn" disabled>Stop Detection</button>
+            </div>
+            
+            <div id="status" class="status">
+                Connecting to API...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = 'http://localhost:5050/api';
+        const DETECTION_INTERVAL = 100; // milliseconds between detection requests (faster updates)
+        
+        // Elements
+        const webcamElement = document.getElementById('webcam');
+        const targetLetterElement = document.getElementById('target-letter');
+        const instructionsList = document.getElementById('instructions-list');
+        const feedbackElement = document.getElementById('feedback');
+        const confidenceBarElement = document.getElementById('confidence-bar');
+        const thresholdMarkerElement = document.getElementById('threshold-marker');
+        const confidenceTextElement = document.getElementById('confidence-text');
+        const letterSelectorElement = document.getElementById('letter-selector');
+        const toggleBtn = document.getElementById('toggle-btn');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const statusElement = document.getElementById('status');
+        
+        // State
+        let currentTargetLetter = '';
+        let availableLetters = [];
+        let detectionInterval = null;
+        let confidenceThreshold = 0.7; // Default, will be updated from API
+        let stream = null;
+        let isProcessing = false; // Flag to prevent overlapping requests
+        
+        // Initialize
+        async function initialize() {
+            try {
+                // Check API health
+                const healthResponse = await fetch(`${API_BASE_URL}/health`);
+                const healthData = await healthResponse.json();
+                
+                if (!healthData.model_loaded) {
+                    statusElement.textContent = 'Error: No model loaded on server';
+                    return;
+                }
+                
+                // Get available letters
+                await getAvailableLetters();
+                
+                // Setup camera
+                await setupCamera();
+                
+                // Setup event listeners
+                setupEventListeners();
+                
+                statusElement.textContent = 'Ready to detect. Press Start to begin.';
+            } catch (error) {
+                console.error('Initialization error:', error);
+                statusElement.textContent = `Error: ${error.message}`;
+            }
+        }
+        
+        // Get available letters from API
+        async function getAvailableLetters() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/available_letters`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    availableLetters = data.available_letters;
+                    currentTargetLetter = availableLetters[0];
+                    targetLetterElement.textContent = currentTargetLetter.toUpperCase();
+                    
+                    // Create letter buttons
+                    letterSelectorElement.innerHTML = '';
+                    availableLetters.forEach(letter => {
+                        const button = document.createElement('button');
+                        button.className = 'letter-btn';
+                        button.textContent = letter.toUpperCase();
+                        button.dataset.letter = letter;
+                        if (letter === currentTargetLetter) {
+                            button.classList.add('active');
+                        }
+                        button.addEventListener('click', () => selectLetter(letter));
+                        letterSelectorElement.appendChild(button);
+                    });
+                } else {
+                    statusElement.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                console.error('Error getting available letters:', error);
+                statusElement.textContent = 'Error connecting to API';
+            }
+        }
+        
+        // Setup webcam
+        async function setupCamera() {
+            try {
+                const constraints = {
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'user',
+                        frameRate: { ideal: 30 }
+                    }
+                };
+                
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                webcamElement.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    webcamElement.onloadedmetadata = () => {
+                        resolve();
+                    };
+                });
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                statusElement.textContent = 'Error accessing camera. Please allow camera access and refresh.';
+                throw error;
+            }
+        }
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            toggleBtn.addEventListener('click', toggleLetter);
+            startBtn.addEventListener('click', startDetection);
+            stopBtn.addEventListener('click', stopDetection);
+        }
+        
+        // Toggle to next letter
+        async function toggleLetter() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/toggle_letter`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    currentTargetLetter = data.target_letter;
+                    targetLetterElement.textContent = currentTargetLetter.toUpperCase();
+                    updateActiveLetterButton();
+                    // Clear previous detection results
+                    feedbackElement.textContent = 'Waiting for detection...';
+                    feedbackElement.className = 'feedback';
+                    confidenceBarElement.style.width = '0%';
+                    confidenceTextElement.textContent = 'Confidence: 0%';
+                } else {
+                    statusElement.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                console.error('Error toggling letter:', error);
+                statusElement.textContent = 'Error communicating with API';
+            }
+        }
+        
+        // Select a specific letter
+        async function selectLetter(letter) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/set_letter`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ letter })
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    currentTargetLetter = data.target_letter;
+                    targetLetterElement.textContent = currentTargetLetter.toUpperCase();
+                    updateActiveLetterButton();
+                    // Clear previous detection results
+                    feedbackElement.textContent = 'Waiting for detection...';
+                    feedbackElement.className = 'feedback';
+                    confidenceBarElement.style.width = '0%';
+                    confidenceTextElement.textContent = 'Confidence: 0%';
+                } else {
+                    statusElement.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                console.error('Error setting letter:', error);
+                statusElement.textContent = 'Error communicating with API';
+            }
+        }
+        
+        // Update the active letter button
+        function updateActiveLetterButton() {
+            const buttons = letterSelectorElement.querySelectorAll('.letter-btn');
+            buttons.forEach(button => {
+                if (button.dataset.letter === currentTargetLetter) {
+                    button.classList.add('active');
+                } else {
+                    button.classList.remove('active');
+                }
+            });
+        }
+        
+        // Start detection
+        function startDetection() {
+            if (detectionInterval) return;
+            
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            statusElement.textContent = 'Detection running...';
+            
+            // Start detection loop
+            detectSign(); // Run once immediately
+            detectionInterval = setInterval(detectSign, DETECTION_INTERVAL);
+        }
+        
+        // Stop detection
+        function stopDetection() {
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+                detectionInterval = null;
+            }
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusElement.textContent = 'Detection stopped';
+        }
+        
+        // Perform sign detection
+        async function detectSign() {
+            // Skip if we're still processing the previous frame
+            if (isProcessing) return;
+            
+            try {
+                isProcessing = true;
+                
+                // Capture current frame from webcam
+                const canvas = document.createElement('canvas');
+                canvas.width = webcamElement.videoWidth;
+                canvas.height = webcamElement.videoHeight;
+                const ctx = canvas.getContext('2d');
+                
+                // Use a higher quality draw operation
+                ctx.imageSmoothingEnabled = false; // Disable smoothing for sharper edges
+                ctx.drawImage(webcamElement, 0, 0);
+                
+                // Convert to base64 with higher quality
+                const imageData = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+                
+                // Send to API
+                const response = await fetch(`${API_BASE_URL}/detect`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: imageData,
+                        target_letter: currentTargetLetter
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Update instructions
+                    if (data.instructions && data.instructions.length > 0) {
+                        instructionsList.innerHTML = data.instructions.map(instruction => 
+                            `<li>${instruction}</li>`
+                        ).join('');
+                    }
+                    
+                    // Update detection results
+                    if (data.detected_hands && data.detected_hands.length > 0) {
+                        // Use the first detected hand for simplicity
+                        const hand = data.detected_hands[0];
+                        
+                        // Update confidence bar
+                        const confidencePercent = Math.round(hand.confidence * 100);
+                        confidenceBarElement.style.width = `${confidencePercent}%`;
+                        
+                        // Set bar color based on confidence
+                        if (hand.sign_detected) {
+                            confidenceBarElement.style.backgroundColor = '#4CAF50'; // Green
+                        } else if (hand.confidence > 0.5) {
+                            confidenceBarElement.style.backgroundColor = '#FFA726'; // Orange
+                        } else {
+                            confidenceBarElement.style.backgroundColor = '#F44336'; // Red
+                        }
+                        
+                        // Set threshold marker
+                        thresholdMarkerElement.style.left = `${confidenceThreshold * 100}%`;
+                        
+                        // Update confidence text
+                        confidenceTextElement.textContent = `Confidence: ${confidencePercent}%`;
+                        
+                        // Update feedback
+                        feedbackElement.textContent = hand.position_feedback;
+                        if (hand.is_correct_position) {
+                            feedbackElement.className = 'feedback correct';
+                        } else {
+                            feedbackElement.className = 'feedback incorrect';
+                        }
+                    } else {
+                        // No hand detected
+                        feedbackElement.textContent = 'No hand detected';
+                        feedbackElement.className = 'feedback';
+                        confidenceBarElement.style.width = '0%';
+                        confidenceTextElement.textContent = 'Confidence: 0%';
+                    }
+                } else {
+                    statusElement.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                console.error('Error detecting sign:', error);
+                statusElement.textContent = 'Error communicating with API';
+            } finally {
+                isProcessing = false;
+            }
+        }
+        
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', initialize);
+    </script>
+</body>
+</html> 
