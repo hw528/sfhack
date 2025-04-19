@@ -1,10 +1,9 @@
 import cv2
-import numpy as np
 import mediapipe as mp
-import time
+import numpy as np
 import os
 import joblib
-from collections import defaultdict
+import time
 import argparse
 import glob
 import sys
@@ -48,6 +47,9 @@ def extract_features(landmarks, is_right_hand):
     # Flatten coordinates into a 1D array
     features = []
     
+    # Add a feature to indicate hand type (0 for left, 1 for right)
+    features.append(1.0 if is_right_hand else 0.0)
+    
     # Add all raw landmarks (x, y, z for each of the 21 landmarks)
     for landmark in landmarks:
         features.extend([landmark.x, landmark.y, landmark.z])
@@ -90,19 +92,7 @@ def extract_features(landmarks, is_right_hand):
         features.append(landmarks[i].y - wrist.y)
         features.append(landmarks[i].z - wrist.z)
     
-    # Convert to numpy array for scaling
-    features = np.array(features).reshape(1, -1)
-    
-    # Load the scaler used in training
-    scaler_path = '/Users/wuhaodong/SFhack/models/run_0416_141356/feature_scaler_0416_141356.joblib'
-    try:
-        scaler = joblib.load(scaler_path)
-        # Scale the features
-        scaled_features = scaler.transform(features)
-        return scaled_features[0]  # Return as 1D array
-    except FileNotFoundError:
-        print(f"Warning: Scaler file not found at {scaler_path}. Using unscaled features.")
-        return features[0]  # Return unscaled features if scaler not found
+    return features
 
 def get_asl_position_feedback(letter, landmarks):
     """Analyze landmarks to provide correction feedback for specific ASL signs."""
@@ -539,7 +529,7 @@ def load_all_models(models_dir):
     
     # First check for a combined model
     combined_model_paths = [
-        os.path.join(models_dir, "asl_combined_model_improved.joblib"),
+        os.path.join(models_dir, "asl_combined_model.joblib"),
         os.path.join(models_dir, "combined_model.joblib")
     ]
     
@@ -630,86 +620,68 @@ class ASLDetector:
     def __init__(self):
         # Initialize MediaPipe hands
         self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5)
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_drawing_styles = mp.solutions.drawing_styles
         
-        # Initialize model and label encoder
-        self.model = None
-        self.label_encoder = None
-        self.model_path = None
-        self.scaler_path = None
-        self.label_encoder_path = None
+        # Higher confidence for detection
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
         
-        # Default values
-        self.target_hand = "right"
-        self.target_letter = "a"
-        self.last_sign = "None"
-        self.detection_count = 0
-        self.confidence_score = 0.0
+        # Model paths and settings
+        self.models_dir = "./webcam_models"
+        self.model = None
+        self.model_classes = []
+        
+        # Target letter and hand settings
+        self.target_letter = 'a'  # Default to letter 'a'
+        self.target_hand = "both"  # Default to both hands
         self.confidence_threshold = 0.7
+        
+        # Load model
+        self.load_model()
     
-    def load_model(self, model_path):
-        """Load a trained model from the specified path."""
-        try:
-            self.model_path = model_path
-            self.model = joblib.load(model_path)
-            
-            # Extract run directory from model path
-            run_dir = os.path.dirname(model_path)
-            
-            # Try to find and load the scaler in the same directory
-            # First look for any file with "feature_scaler" in the name
-            scaler_files = [f for f in os.listdir(run_dir) if "feature_scaler" in f]
-            if scaler_files:
-                self.scaler_path = os.path.join(run_dir, scaler_files[0])
-            else:
-                # Default location with same timestamp as model
-                timestamp = os.path.basename(model_path).split('_')[-1].split('.')[0]
-                potential_scaler_path = os.path.join(run_dir, f"feature_scaler_{timestamp}.joblib")
-                if os.path.exists(potential_scaler_path):
-                    self.scaler_path = potential_scaler_path
-                else:
-                    self.scaler_path = None
-                    print("Warning: Could not find scaler file. Features will not be scaled.")
-            
-            # Try to find and load the label encoder in the same directory
-            label_encoder_files = [f for f in os.listdir(run_dir) if "label_encoder" in f]
-            if label_encoder_files:
-                self.label_encoder_path = os.path.join(run_dir, label_encoder_files[0])
-                self.label_encoder = joblib.load(self.label_encoder_path)
-            else:
-                # Default location with same timestamp as model
-                potential_encoder_path = os.path.join(run_dir, f"label_encoder_{timestamp}.joblib")
-                if os.path.exists(potential_encoder_path):
-                    self.label_encoder_path = potential_encoder_path
-                    self.label_encoder = joblib.load(self.label_encoder_path)
-                else:
-                    self.label_encoder = None
-                    print("Warning: Could not find label encoder. Predictions may not be correctly mapped.")
-            
-            print(f"Model loaded successfully from: {model_path}")
-            if self.scaler_path:
-                print(f"Feature scaler loaded from: {self.scaler_path}")
-            if self.label_encoder_path:
-                print(f"Label encoder loaded from: {self.label_encoder_path}")
-                print(f"Available letters: {', '.join(self.label_encoder.classes_)}")
-            
-            return True
-        except Exception as e:
-            self.model = None
-            self.scaler_path = None
-            self.label_encoder = None
-            print(f"Error loading model: {e}")
-            return False
+    def load_model(self):
+        """Load the combined ASL model."""
+        # Check for a combined model
+        combined_model_paths = [
+            os.path.join(self.models_dir, "asl_combined_model.joblib"),
+            os.path.join(self.models_dir, "combined_model.joblib")
+        ]
+        
+        combined_model_path = None
+        for path in combined_model_paths:
+            if os.path.exists(path):
+                combined_model_path = path
+                break
+        
+        if combined_model_path:
+            try:
+                self.model = joblib.load(combined_model_path)
+                print(f"Successfully loaded model from {combined_model_path}")
+                if hasattr(self.model, 'classes_'):
+                    self.model_classes = self.model.classes_
+                    print(f"Model can predict: {', '.join(self.model_classes)}")
+                return True
+            except Exception as e:
+                print(f"Error loading model: {e}")
+        else:
+            print(f"No model found in {self.models_dir}")
+        
+        return False
     
     def extract_features(self, landmarks, is_right_hand=True):
+        """Extract features from hand landmarks for the model."""
+        # Flatten coordinates into a 1D array
         features = []
-        # Remove the hand_type feature, just use landmarks
+        
+        # Add a feature to indicate hand type (0 for left, 1 for right)
+        features.append(1.0 if is_right_hand else 0.0)
+        
+        # Add all raw landmarks (x, y, z for each of the 21 landmarks)
         for landmark in landmarks:
             features.extend([landmark.x, landmark.y, landmark.z])
         
@@ -751,21 +723,7 @@ class ASLDetector:
             features.append(landmarks[i].y - wrist.y)
             features.append(landmarks[i].z - wrist.z)
         
-        # Convert to numpy array for scaling
-        features = np.array(features).reshape(1, -1)
-        
-        # Scale features if scaler is available
-        if self.scaler_path:
-            try:
-                scaler = joblib.load(self.scaler_path)
-                scaled_features = scaler.transform(features)
-                return scaled_features[0]  # Return as 1D array
-            except Exception as e:
-                print(f"Error scaling features: {e}")
-                return features[0]  # Return unscaled features if error occurs
-        else:
-            # Return unscaled features if no scaler is available
-            return features[0]
+        return features
     
     def get_hand_type(self, hand_landmarks, results):
         """Determine if the hand is left or right."""
@@ -2126,7 +2084,7 @@ class ASLDetector:
                     probabilities = self.model.predict_proba([features])[0]
                     
                     # Match probability to the correct letter
-                    letter_index = self.label_encoder.transform([self.target_letter])[0]
+                    letter_index = np.where(self.model_classes == self.target_letter)[0][0]
                     target_probability = probabilities[letter_index]
                     
                     # First determine if the sign is detected based on confidence threshold
@@ -2225,128 +2183,31 @@ def main():
     print("================================================")
     print("This detector will automatically recognize signs from either hand")
     
-    # Default paths based on most recent run
-    default_run_dir = '/Users/wuhaodong/SFhack/models/run_0416_141356'
-    
-    # List all run directories and sort by most recent
-    models_dir = '/Users/wuhaodong/SFhack/models'
-    if os.path.exists(models_dir):
-        run_dirs = sorted([d for d in os.listdir(models_dir) if d.startswith('run_')], reverse=True)
-        if run_dirs:
-            default_run_dir = os.path.join(models_dir, run_dirs[0])
+    if not os.path.exists("./webcam_models"):
+        os.makedirs("./webcam_models")
+        print("Created webcam_models directory. Please place your model file there.")
     
     while True:
         print("\nOptions:")
-        print("1. Load model")
-        print("2. List available models")
-        print("3. Detect signs (requires model)")
-        print("4. Exit")
+        print("1. Load model from a different directory")
+        print("2. Detect signs (requires model)")
+        print("3. Exit")
         
-        choice = input("\nEnter your choice (1-4): ")
+        choice = input("\nEnter your choice (1-3): ")
         
         if choice == '1':
-            print("\nLoad Model Options:")
-            print("1. Specify model file path directly")
-            print("2. Select from run directories")
-            
-            model_choice = input("\nEnter choice (1-2): ")
-            
-            if model_choice == '1':
-                model_path = input("Enter the full path to the model file: ")
-                detector.load_model(model_path)
-            elif model_choice == '2':
-                if os.path.exists(models_dir):
-                    run_dirs = sorted([d for d in os.listdir(models_dir) if d.startswith('run_')], reverse=True)
-                    if not run_dirs:
-                        print("No run directories found. Run training first.")
-                        continue
-                    
-                    print("\nAvailable run directories (most recent first):")
-                    for i, run_dir in enumerate(run_dirs):
-                        print(f"{i+1}. {run_dir}")
-                    
-                    dir_choice = input(f"\nSelect directory number (1-{len(run_dirs)}): ")
-                    try:
-                        dir_idx = int(dir_choice) - 1
-                        if 0 <= dir_idx < len(run_dirs):
-                            selected_run_dir = os.path.join(models_dir, run_dirs[dir_idx])
-                            
-                            # List model files in the directory
-                            model_files = [f for f in os.listdir(selected_run_dir) if f.endswith('.joblib') and not f.startswith('label_encoder') and not f.startswith('feature_scaler')]
-                            if not model_files:
-                                print(f"No model files found in {selected_run_dir}")
-                                continue
-                            
-                            print("\nAvailable models:")
-                            for i, model_file in enumerate(model_files):
-                                print(f"{i+1}. {model_file}")
-                            
-                            model_file_choice = input(f"\nSelect model file number (1-{len(model_files)}): ")
-                            try:
-                                model_idx = int(model_file_choice) - 1
-                                if 0 <= model_idx < len(model_files):
-                                    selected_model = os.path.join(selected_run_dir, model_files[model_idx])
-                                    detector.load_model(selected_model)
-                                else:
-                                    print("Invalid model selection.")
-                            except ValueError:
-                                print("Invalid input. Please enter a number.")
-                        else:
-                            print("Invalid directory selection.")
-                    except ValueError:
-                        print("Invalid input. Please enter a number.")
-                else:
-                    print(f"Models directory {models_dir} not found.")
-        
+            model_dir = input("Enter the directory path containing the model: ")
+            detector.models_dir = model_dir
+            detector.load_model()
         elif choice == '2':
-            if os.path.exists(models_dir):
-                run_dirs = sorted([d for d in os.listdir(models_dir) if d.startswith('run_')], reverse=True)
-                if not run_dirs:
-                    print("No run directories found. Run training first.")
-                    continue
-                
-                print("\nAvailable run directories (most recent first):")
-                for i, run_dir in enumerate(run_dirs):
-                    print(f"{i+1}. {run_dir}")
-                    
-                    # List model files in each directory
-                    run_path = os.path.join(models_dir, run_dir)
-                    model_files = [f for f in os.listdir(run_path) if f.endswith('.joblib') and not f.startswith('label_encoder') and not f.startswith('feature_scaler')]
-                    for model_file in model_files:
-                        print(f"   - {model_file}")
-            else:
-                print(f"Models directory {models_dir} not found.")
-        
-        elif choice == '3':
+            detector.load_model()
             if detector.model is not None:
                 detector.detect_sign()
             else:
-                print("\nNo model loaded. Let's load a model first.")
-                # Try to find the most recent model
-                if os.path.exists(default_run_dir):
-                    model_files = [f for f in os.listdir(default_run_dir) if f.endswith('.joblib') and not f.startswith('label_encoder') and not f.startswith('feature_scaler')]
-                    if model_files:
-                        # Prefer XGBoost if available
-                        xgb_models = [f for f in model_files if 'xgboost' in f.lower()]
-                        if xgb_models:
-                            model_path = os.path.join(default_run_dir, xgb_models[0])
-                        else:
-                            model_path = os.path.join(default_run_dir, model_files[0])
-                        
-                        print(f"Loading the most recent model: {model_path}")
-                        if detector.load_model(model_path):
-                            detector.detect_sign()
-                        else:
-                            print("Failed to load model. Please select a model manually.")
-                    else:
-                        print("No model files found in the most recent run directory.")
-                else:
-                    print("No run directories found. Please train models first or select a model manually.")
-        
-        elif choice == '4':
+                print("No model loaded. Please load a model first.")
+        elif choice == '3':
             print("Exiting program")
             break
-        
         else:
             print("Invalid choice. Please try again.")
 
